@@ -1,20 +1,26 @@
-import { Jimp, ResizeStrategy } from "jimp";
+import { Jimp } from "jimp";
 import { Tensor } from "onnxruntime-web";
-
+import { classList } from "./classes";
 import { useEffect, useState } from "react";
-import reactLogo from "./assets/react.svg";
-import viteLogo from "/vite.svg";
-import "./App.css";
 import { load_model } from "./model";
+
+interface Prediction {
+  idx: number;
+  probability: number;
+  class: string;
+}
+
 function App() {
-  const [session, setSession] = useState<any | null>(null);
+  const [session, setSession] = useState<any>(null);
   const [previewImage, setPreviewImage] = useState<any>(null);
-  const [predictions, setPredictions] = useState<any[] | null>(null);
-  const [ready, setReady] = useState<boolean>(false);
+  const [predictions, setPredictions] = useState<Prediction[] | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+
   useEffect(() => {
+    setIsLoading(true);
     load_model().then((res) => {
-      console.log(res);
       setSession(res);
+      setIsLoading(false);
     });
   }, []);
 
@@ -25,25 +31,36 @@ function App() {
     if (e.target.files.length === 0) return;
     const file = e.target.files[0];
 
-    console.log(e);
-    loadImagefromPath(file.name);
-
-    // Read the file
-    const fileReader = new FileReader();
-    fileReader.addEventListener("load", async () => {
-      setPreviewImage(fileReader.result);
+    // Read the file for preview
+    const fileReaderPreview = new FileReader();
+    fileReaderPreview.addEventListener("load", async (e) => {
+      setPreviewImage(e.target?.result);
       setPredictions([]);
-      console.log(fileReader);
     });
-    fileReader.readAsDataURL(file);
+    fileReaderPreview.readAsDataURL(file);
+
+    // Read the file for ML
+    const fileReaderML = new FileReader();
+    fileReaderML.addEventListener("load", async (e) => {
+      const image = await Jimp.fromBuffer(e.target?.result);
+      const inputTensor = await processImageML(image);
+      const feeds: any = {};
+      feeds[session.inputNames[0]] = inputTensor;
+      // Run inference
+      const output = await session.run(feeds);
+      // Format output
+      const logits = output.class_logits.cpuData as number[];
+      const _probs = softmax(logits);
+      const probs = Array.prototype.slice.call(_probs); // Need to convert into regular array
+      const tops = getTopClasses(probs, 5);
+      setPredictions(tops);
+    });
+    fileReaderML.readAsArrayBuffer(file);
   };
 
-  function handleLoad(e: any) {
-    if (!session) return;
-  }
-
+  if (isLoading) return <div className="container">Loading...</div>;
   return (
-    <>
+    <div className="container">
       <h1>Image Classifier</h1>
       <div>
         <input type="file" onChange={handleSelectImage} />
@@ -54,27 +71,40 @@ function App() {
             id="my-img"
             src={previewImage}
             alt="preview-image"
-            style={{ height: "50vh" }}
-            onLoad={handleLoad}
+            style={{ height: "50vh", borderRadius: "0.5rem" }}
           />
         )}
       </div>
 
-      <div>
-        <h2>Prediction</h2>
-        {predictions?.map((p) => (
-          <div key={p.className}>
-            {p.className} (มั่นใจ {(p.probability * 100).toFixed(0)}%)
-          </div>
-        ))}
-      </div>
-    </>
+      {predictions && (
+        <article>
+          <h2>Predictions</h2>
+          {predictions?.map((p) => (
+            <div key={p.class}>
+              <b>{capital(p.class)}</b>
+              &nbsp; &nbsp;
+              <em>({(p.probability * 100).toFixed(0)}% likely)</em>
+            </div>
+          ))}
+        </article>
+      )}
+    </div>
   );
 }
 
 export default App;
 
-function imageDataToTensor(image: any, dims: number[]): Tensor {
+async function processImageML(
+  image: any,
+  dims: number[] = [1, 3, 224, 224],
+  width: number = 224,
+  height: number = 224
+) {
+  image.resize({
+    w: width,
+    h: height,
+  });
+
   // 1. Get buffer data from image and create R, G, and B arrays.
   var imageBufferData = image.bitmap.data;
   const [redArray, greenArray, blueArray] = new Array(
@@ -107,16 +137,37 @@ function imageDataToTensor(image: any, dims: number[]): Tensor {
   return inputTensor;
 }
 
-async function loadImagefromPath(
-  path: string,
-  width: number = 224,
-  height: number = 224
-): Promise<any> {
-  // Load image and resize
-  const image = await Jimp.read(path);
-  image.resize({
-    w: width,
-    h: height,
-  });
-  return image;
+function softmax(logits: number[]): number[] {
+  // For numerical stability, subtract the max logit before exponentiation
+  const maxLogit = Math.max(...logits);
+  const exps = logits.map((x) => Math.exp(x - maxLogit));
+  const sumExps = exps.reduce((a, b) => a + b, 0);
+  return exps.map((e) => e / sumExps);
+}
+
+function getTopClasses(probs: number[], n = 5) {
+  // Pair each probability with its index
+  const probIdx = probs.map((prob, idx) => ({
+    idx,
+    probability: prob,
+  }));
+
+  // Sort by probability descending
+  probIdx.sort((a, b) => b.probability - a.probability);
+  // Get top n
+  const probIdxSlice = probIdx.slice(0, n);
+  // Add class
+  const probIdxClass = probIdxSlice.map((el) => ({
+    ...el,
+    class: classList[el.idx],
+  }));
+
+  return probIdxClass;
+}
+
+function capital(val: string) {
+  return val.replace(
+    /\w\S*/g,
+    (text) => text.charAt(0).toUpperCase() + text.substring(1).toLowerCase()
+  );
 }
