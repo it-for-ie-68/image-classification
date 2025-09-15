@@ -30,7 +30,7 @@ export async function convertImageToTensor(
   return new Tensor("float32", float32Data, dims);
 }
 
-export interface Output {
+export interface ONNX_Output {
   class_logits: ClassLogits;
 }
 
@@ -42,7 +42,7 @@ export interface ClassLogits {
   size: number;
 }
 
-export function formatOutput(output: Output) {
+export function formatOutput(output: ONNX_Output) {
   const _logits = output.class_logits.cpuData; // FloatArray
   const logits = Array.prototype.slice.call(_logits) as number[]; // Convert to Array
   const probs = softmax(logits);
