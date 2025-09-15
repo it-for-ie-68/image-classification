@@ -999,4 +999,4 @@ bolete
 ear
 toilet tissue`;
 
-export const classList = classStr.split("\n"); // Result: ["apple", "banana", "orange"]
+export const classList = classStr.split("\n");
