@@ -28,7 +28,7 @@ function App() {
     const fileReaderPreview = new FileReader();
     fileReaderPreview.addEventListener("load", async (e) => {
       setPreviewImage(e.target?.result);
-      setPredictions([]);
+      // setPredictions([]);
     });
     fileReaderPreview.readAsDataURL(file); // Start reading the file
 
